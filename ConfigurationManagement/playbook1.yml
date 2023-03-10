@@ -1,0 +1,104 @@
+- name: PublicPlay
+  become: true
+  hosts: public
+  tasks:
+    - name: change permissions of conf files
+      file:
+        path: /run/systemd/resolve/stub-resolv.conf
+        state: file
+        mode: '777'
+
+    - name: Configuring dns resolver
+      blockinfile:
+        create: true
+        path: /etc/resolv.conf
+        block: |
+          nameserver 8.8.8.8 
+          nameserver 4.4.4.4 
+
+    - name: install nginx
+      apt: 
+        update_cache: yes
+        name: nginx
+
+    # - name: Unlink Default Host Configuration 
+    #   shell: unlink /etc/nginx/sites-enabled/default
+
+    - name: Configuring nginx proxy
+      blockinfile:
+        create: true
+        path: /etc/nginx/sites-available/reverse-proxy.conf
+        block: |
+          server {
+              listen 80;
+              location / {
+                  proxy_pass http://internal-second-ALB-Private-713327904.us-east-1.elb.amazonaws.com;
+              }
+          }
+
+    - name:  create a symbolic link for nginx configuration
+      shell: ln -s /etc/nginx/sites-available/reverse-proxy.conf /etc/nginx/sites-enabled/reverse-proxy.conf
+
+    - name: restart nginx
+      command: |
+        systemctl restart nginx
+    
+    - name: upload configuration files
+      synchronize:
+        src: "{{ item.file}}"
+        dest: /home/ubuntu
+      loop:
+      - {file: './playbook1.yml'}
+      - {file: './inventory'}
+      - {file: './ssh-public.pem'}
+
+    - name: change permissions
+      file:
+        path: "{{ item.file }}"
+        mode: '777'
+      loop:
+      - {file: './playbook1.yml'}
+      - {file: './inventory'}
+      - {file: './ssh-public.pem'}
+
+    - name: install ansible on machines
+      apt:
+        update_cache: yes
+        name: ansible
+    
+    - name: make hosts file
+      file:
+        path: /home/ubuntu/.ssh/known_hosts
+        state: touch
+        mode: '777'
+
+    - name: gather SSH public keys from private machine1
+      shell: ssh-keyscan 10.0.1.251 > /home/ubuntu/.ssh/known_hosts
+
+    - name: gather SSH public keys from private machine2
+      shell: ssh-keyscan 10.0.3.159 >> /home/ubuntu/.ssh/known_hosts
+
+    - name: run PrivatePlay
+      shell: ansible-playbook /home/ubuntu/playbook1.yml -i /home/ubuntu/inventory    --start-at-task "install apache"
+      #when: inventory_hostname == "machine1"
+
+- name: PrivatePlay
+  become: true
+  hosts: private
+  tasks:
+    - name: install apache
+      apt: 
+        update_cache: yes
+        name: apache2
+
+    - name: make index file
+      shell: echo "<h1> This is executed by terraform on $(hostname -f) </h1>" > /var/www/html/index.html
+      
+  
+    
+
+     
+
+
+     
+        
